@@ -107,6 +107,12 @@ class ConversationManager(private val context: Context) {
     private var tts: TextToSpeech? = null
     @Volatile private var ttsReady = false
 
+    // Exposed so the caller can tell the user *why* nothing is happening
+    // after repeated failed listen attempts, instead of silently retrying
+    // forever with zero feedback.
+    @Volatile var lastErrorCode: Int? = null
+        private set
+
     init {
         tts = TextToSpeech(context) { status ->
             ttsReady = (status == TextToSpeech.SUCCESS)
@@ -123,11 +129,16 @@ class ConversationManager(private val context: Context) {
 
     /**
      * Listens once and returns the best-guess transcription, or null on
-     * timeout/error/no-match. The three EXTRA_SPEECH_INPUT_* tunables below
-     * are the real sensitivity lever Android's SpeechRecognizer exposes -
-     * there's no raw microphone-gain control, but loosening these silence/
-     * length thresholds gives quiet or hesitant speech more room before the
-     * recognizer decides you're done talking.
+     * timeout/error/no-match (check lastErrorCode for why). The three
+     * EXTRA_SPEECH_INPUT_* tunables below are the real sensitivity lever
+     * Android's SpeechRecognizer exposes - there's no raw microphone-gain
+     * control, but loosening these silence/length thresholds gives quiet
+     * or hesitant speech more room before the recognizer decides you're
+     * done talking. EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS is kept short
+     * (2s) deliberately - it's "don't finalize before this much time has
+     * passed," and setting it too high (an earlier version of this code
+     * used 15s) makes the assistant feel unresponsive since it won't give
+     * an answer back until that minimum window closes.
      */
     suspend fun listenOnce(): String? = suspendCancellableCoroutine { cont ->
         val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
@@ -147,8 +158,12 @@ class ConversationManager(private val context: Context) {
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
-            override fun onError(error: Int) = finish(null)
+            override fun onError(error: Int) {
+                lastErrorCode = error
+                finish(null)
+            }
             override fun onResults(results: Bundle) {
+                lastErrorCode = null
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 finish(matches?.firstOrNull())
             }
@@ -160,7 +175,7 @@ class ConversationManager(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15000)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
         }
@@ -493,20 +508,32 @@ fun ConversationOrb(
         running = true
         scope.launch {
             convManager.waitForTts()
+            var consecutiveFailures = 0
             while (running) {
                 state = "listening"
                 val heard = convManager.listenOnce()
                 if (!running) break
                 if (heard.isNullOrBlank()) {
-                    // No match/timeout this round - just listen again rather
-                    // than treating it as an error, since silence is normal.
-                    // The small delay avoids hammering the recognizer in a
-                    // tight loop on the rare device where it errors instantly
-                    // and repeatedly (e.g. no speech-recognition service
-                    // available at all).
-                    delay(300)
+                    consecutiveFailures++
+                    // Surface what's actually going wrong after a few failed
+                    // attempts, instead of silently retrying forever with no
+                    // feedback - a common real cause is ERROR_NO_MATCH (7)
+                    // or ERROR_SPEECH_TIMEOUT (6), meaning it's not hearing
+                    // anything usable, vs. ERROR_NETWORK (2) meaning no
+                    // internet for the cloud recognizer.
+                    if (consecutiveFailures >= 4) {
+                        val code = convManager.lastErrorCode
+                        lastReply = "Still not catching that (recognizer code: $code). " +
+                            "Check microphone permission and internet connection."
+                        state = "error"
+                        delay(2000)
+                        consecutiveFailures = 0
+                    } else {
+                        delay(300)
+                    }
                     continue
                 }
+                consecutiveFailures = 0
 
                 if (currentApiKey.isBlank()) {
                     lastReply = "Please enter and save an OpenRouter API key below first."
