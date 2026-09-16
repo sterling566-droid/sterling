@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer glow halo -->
+    <path
+        android:pathData="M54,24 C71.7,24 86,38.3 86,56 C86,73.7 71.7,88 54,88 C36.3,88 22,73.7 22,56 C22,38.3 36.3,24 54,24Z"
+        android:fillColor="#553366FF"/>
+
+    <!-- Core orb with vertical gradient blue -> purple -->
+    <path
+        android:pathData="M54,32 C67.3,32 78,42.7 78,56 C78,69.3 67.3,80 54,80 C40.7,80 30,69.3 30,56 C30,42.7 40.7,32 54,32Z"
+        android:fillColor="#3366FF"/>
+    <path
+        android:pathData="M54,56 C67.3,56 78,42.7 78,56 C78,69.3 67.3,80 54,80 C40.7,80 30,69.3 30,56 C30,56 40.7,56 54,56Z"
+        android:fillColor="#CC33CC"
+        android:fillAlpha="0.55"/>
+
+    <!-- Simple soundwave bars, centered, in white -->
+    <path
+        android:pathData="M42,50 L45,50 L45,62 L42,62 Z"
+        android:fillColor="#FFFFFF"/>
+    <path
+        android:pathData="M49.5,44 L52.5,44 L52.5,68 L49.5,68 Z"
+        android:fillColor="#FFFFFF"/>
+    <path
+        android:pathData="M57,48 L60,48 L60,64 L57,64 Z"
+        android:fillColor="#FFFFFF"/>
+    <path
+        android:pathData="M64.5,52 L67.5,52 L67.5,60 L64.5,60 Z"
+        android:fillColor="#FFFFFF"/>
+</vector>
