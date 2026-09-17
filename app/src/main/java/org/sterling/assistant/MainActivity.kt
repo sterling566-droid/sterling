@@ -140,9 +140,16 @@ class ConversationManager(private val context: Context) {
      * used 15s) makes the assistant feel unresponsive since it won't give
      * an answer back until that minimum window closes.
      */
-    suspend fun listenOnce(): String? = suspendCancellableCoroutine { cont ->
+    suspend fun listenOnce(onPartial: (String) -> Unit = {}): String? = suspendCancellableCoroutine { cont ->
         val recognizer = SpeechRecognizer.createSpeechRecognizer(context)
         var resumed = false
+        // ChatGPT-style voice mode treats the live streaming transcript as
+        // the real signal, not just a pass/fail final result. We do the
+        // same here: if the recognizer produces partial text but then
+        // fails to cleanly finalize (a real flakiness point on some
+        // devices/OEM speech engines), we fall back to the last partial
+        // text instead of throwing the whole attempt away as silence.
+        var lastPartialText: String? = null
 
         fun finish(result: String?) {
             if (!resumed) {
@@ -160,14 +167,24 @@ class ConversationManager(private val context: Context) {
             override fun onEndOfSpeech() {}
             override fun onError(error: Int) {
                 lastErrorCode = error
-                finish(null)
+                // Fall back to whatever partial transcript we already
+                // captured rather than discarding a real answer just
+                // because finalization failed.
+                finish(lastPartialText)
             }
             override fun onResults(results: Bundle) {
                 lastErrorCode = null
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                finish(matches?.firstOrNull())
+                finish(matches?.firstOrNull() ?: lastPartialText)
             }
-            override fun onPartialResults(partialResults: Bundle?) {}
+            override fun onPartialResults(partialResults: Bundle?) {
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val text = matches?.firstOrNull()
+                if (!text.isNullOrBlank()) {
+                    lastPartialText = text
+                    onPartial(text)
+                }
+            }
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
 
@@ -175,6 +192,7 @@ class ConversationManager(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
@@ -489,6 +507,7 @@ fun ConversationOrb(
     // idle | listening | thinking | speaking | error
     var state by remember { mutableStateOf("idle") }
     var lastReply by remember { mutableStateOf("") }
+    var liveTranscript by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
@@ -511,7 +530,8 @@ fun ConversationOrb(
             var consecutiveFailures = 0
             while (running) {
                 state = "listening"
-                val heard = convManager.listenOnce()
+                liveTranscript = ""
+                val heard = convManager.listenOnce(onPartial = { liveTranscript = it })
                 if (!running) break
                 if (heard.isNullOrBlank()) {
                     consecutiveFailures++
@@ -642,6 +662,14 @@ fun ConversationOrb(
             },
             style = MaterialTheme.typography.titleMedium,
         )
+
+        if (state == "listening" && liveTranscript.isNotBlank()) {
+            Text(
+                "\"$liveTranscript\"",
+                color = Color(0xFF9999FF),
+                modifier = Modifier.padding(horizontal = 12.dp)
+            )
+        }
 
         if (lastReply.isNotBlank() && state != "listening") {
             Text(
