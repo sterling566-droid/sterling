@@ -28,6 +28,8 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,7 +51,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -193,9 +194,12 @@ class ConversationManager(private val context: Context) {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
+            // Deliberately NOT setting EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS
+            // or the silence-length extras here anymore. That custom tuning
+            // caused a real bug before (an accidental 15-second minimum wait)
+            // and Google's own voice search on this device works correctly
+            // using just the plain defaults - so we trust those instead of
+            // guessing at custom values.
         }
         recognizer.startListening(intent)
 
@@ -317,7 +321,7 @@ fun SterlingScreen(activity: ComponentActivity, prefs: SharedPreferences) {
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Text(
-            "Sterling",
+            "SterlingAI",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold
         )
@@ -588,13 +592,10 @@ fun ConversationOrb(
         state = "idle"
     }
 
-    // Auto-start the conversation the moment the app opens, provided mic
-    // permission is already granted - this is the "no wake word, just talk"
-    // behavior. If permission isn't granted yet, the button below prompts
-    // for it, and this effect fires again once it's granted.
-    LaunchedEffect(hasAudioPermission) {
-        if (hasAudioPermission) startLoop()
-    }
+    // No auto-start anymore - tap the orb (or the button below it) to
+    // begin. Simpler and more predictable than starting the moment the
+    // app opens, and matches the manual tap-to-talk pattern of other
+    // voice assistants.
 
     val orbColor = when (state) {
         "listening" -> NeonGreen
@@ -636,7 +637,23 @@ fun ConversationOrb(
         modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(180.dp)) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .size(180.dp)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) {
+                    if (!hasAudioPermission) {
+                        onRequestPermission()
+                    } else if (running) {
+                        stopLoop()
+                    } else {
+                        startLoop()
+                    }
+                }
+        ) {
             Box(
                 modifier = Modifier
                     .size(120.dp)
@@ -658,7 +675,7 @@ fun ConversationOrb(
                 state == "thinking" -> "Thinking..."
                 state == "speaking" -> "Speaking..."
                 state == "error" -> "Something went wrong"
-                else -> "Idle"
+                else -> "Tap the orb to start"
             },
             style = MaterialTheme.typography.titleMedium,
         )

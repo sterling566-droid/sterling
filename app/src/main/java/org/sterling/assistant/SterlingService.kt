@@ -342,13 +342,11 @@ class SterlingService : Service(), TextToSpeech.OnInitListener {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
                 putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
                 putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
-                // Android's SpeechRecognizer has no direct microphone-gain
-                // control, but loosening these silence/length thresholds
-                // gives quiet or hesitant speech more room before the
-                // recognizer decides you're done talking.
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 2000)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
-                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1500)
+                // Deliberately not setting custom EXTRA_SPEECH_INPUT_* silence/
+                // length tuning here - it caused real bugs (a 15s minimum wait,
+                // and likely contributed to persistent no-match errors) without
+                // clear benefit. Plain defaults match what Google's own voice
+                // search uses successfully.
             }
             recognizer.startListening(intent)
 
